@@ -1,12 +1,14 @@
 import cs336_basics.model as model_module
 import cs336_basics.nn_utils as nn_utils
+from cs336_basics.adamw import AdamW
 import timeit
 import torch
 import statistics
+from contextlib import nullcontext
 
 
 def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta: float, 
-           warmup_steps: int , steps: int, which_type: str,vocab_size = 10000, context_length = 512, 
+           warmup_steps: int , steps: int, which_type: str, which_data_type: str, vocab_size = 10000, context_length = 512, 
            ):
    
     # if vocab_size > 10000:
@@ -21,34 +23,40 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
     model = model_module.BasicsTransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff
                               , rope_theta).to(device=device)
     model.train()
-    optimizer = torch.optim.AdamW(model.parameters())
+    ctx = (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if which_data_type == "b" else nullcontext())
+    optimizer = AdamW(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01,)
+    # optimizer = torch.optim.AdamW(model.parameters())
     times = []
     counter = 0
     if which_type == "f":
         while counter < warmup_steps:
-            logits = model(x)
+            with ctx:
+                logits = model(x)
             counter+=1
         while counter < warmup_steps + steps:
             torch.cuda.synchronize()
             time_start = timeit.default_timer()
-            logits = model(x)
+            with ctx:
+                logits = model(x)
             torch.cuda.synchronize()
             time_end = timeit.default_timer()
             times.append(time_end-time_start)
             counter+=1
     elif which_type == "fb":
         while counter < warmup_steps:
-            logits = model(x)
-            loss = nn_utils.cross_entropy(logits, y)
             optimizer.zero_grad(set_to_none = True)
+            with ctx:
+                logits = model(x)
+                loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
             counter+=1
         while counter < warmup_steps + steps:
             torch.cuda.synchronize()
             time_start = timeit.default_timer()
-            logits = model(x)
-            loss = nn_utils.cross_entropy(logits, y)
             optimizer.zero_grad(set_to_none = True)
+            with ctx:
+                logits = model(x)
+                loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
             torch.cuda.synchronize()
             time_end = timeit.default_timer()
@@ -56,18 +64,20 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
             counter+=1
     elif which_type == "fbo":
         while counter < warmup_steps:
-            logits = model(x)
-            loss = nn_utils.cross_entropy(logits, y)
             optimizer.zero_grad(set_to_none = True)
+            with ctx:
+                logits = model(x)
+                loss = nn_utils.cross_entropy(logits, y) 
             loss.backward()
             optimizer.step()
             counter+=1
         while counter < warmup_steps + steps:
             torch.cuda.synchronize()
             time_start = timeit.default_timer()
-            logits = model(x)
-            loss = nn_utils.cross_entropy(logits, y)
             optimizer.zero_grad(set_to_none = True)
+            with ctx:
+                logits = model(x)
+                loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
             optimizer.step()
             torch.cuda.synchronize()

@@ -1,5 +1,18 @@
-# import torch
-# print(torch.randint(0, 10000, (4, 512)).shape)
+import torch
 from benchmarking_script import method
-w_type = "fbo"
-method(120, 4, 2, 90, None,warmup_steps=1,steps=10,which_type=w_type)
+
+# Size d_model d_ff num_layers num_heads
+# small 768 3072 12 12
+# medium 1024 4096 24 16
+# large 1280 5120 36 20
+# xl 2560 10240 32 32
+# 10B 4608 12288 50 36
+
+def main():
+    w_type = "f"
+    which_data_type = None
+    method(d_model=1024, d_ff = 4096, num_layers = 24, num_heads = 16, rope_theta=None, warmup_steps=5,
+        steps=10,which_type=w_type, context_length=512,which_data_type = which_data_type)
+
+if __name__ == "__main__":
+    main()
