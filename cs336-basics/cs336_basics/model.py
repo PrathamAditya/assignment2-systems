@@ -5,14 +5,13 @@ import logging
 import math
 import os
 import warnings
-
+import torch.cuda.nvtx as nvtx
 import einx
 import torch
 import torch.nn as nn
 from einops import einsum, rearrange
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-
 from cs336_basics.nn_utils import softmax
 
 logger = logging.getLogger(__name__)
@@ -398,7 +397,7 @@ class SwiGLU(nn.Module):
     def forward(self, x):
         return self.w2(silu(self.w1(x)) * self.w3(x))
 
-
+@nvtx.range("scaled dot product attention")
 def scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
     K: Float[Tensor, " ... keys    d_k"],
@@ -424,14 +423,16 @@ def scaled_dot_product_attention(
     """
 
     d_k = K.shape[-1]
-    attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
+    with nvtx.range("Attention scores: QK matmul"):
+        attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
 
-    if mask is not None:
-        attention_scores = torch.where(mask, attention_scores, float("-inf"))
-
-    attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
-
-    return einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+        if mask is not None:
+            attention_scores = torch.where(mask, attention_scores, float("-inf"))
+    with nvtx.range("softmax"):
+        attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
+    with nvtx.range("Final matmul: AV matmul"):
+        output = einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+    return output
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
