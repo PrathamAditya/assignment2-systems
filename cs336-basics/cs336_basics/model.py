@@ -13,6 +13,7 @@ from einops import einsum, rearrange
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.nn_utils import softmax
+from torch.utils.checkpoint import checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,6 @@ class RotaryEmbedding(nn.Module):
 
 class BasicsTransformerLM(nn.Module):
     """A Transformer language model.
-
     Args:
         vocab_size: int
             The number of unique items in the output vocabulary to be predicted.
@@ -184,6 +184,7 @@ class BasicsTransformerLM(nn.Module):
         num_layers: int,
         num_heads: int,
         d_ff: int,
+        group_size: int,
         rope_theta: float | None = 10_000.0,
     ):
         # Store the model configuration for serialization / deserialization
@@ -210,6 +211,14 @@ class BasicsTransformerLM(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        # print("Init method.")
+        # if group_size is None:
+        #     print(math.ceil(math.sqrt(len(self.layers))))
+        #     self.group_size = math.ceil(math.sqrt(len(self.layers)))
+        # else:
+        #     print(group_size)
+        #     self.group_size = group_size
+        self.group_size = group_size
         self.ln_final = RMSNorm(d_model)
         self.lm_head = Linear(d_model, vocab_size)
         # Tie the weights, since the paper mentions that "we share the same weight
@@ -227,7 +236,38 @@ class BasicsTransformerLM(nn.Module):
         """
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
-
+    
+    def run_group(self, input_data, start_index, end_index):
+        """Applies layers[start_index:end_index] to input_data."""
+        output = input_data
+        print(f"Ran: {start_index}, {end_index}")
+        for i in range(start_index, end_index):
+            output = self.layers[i](output)
+        return output
+    def forward_in_groups(self, x):
+        counter = 0
+        total_layers = len(self.layers)
+        
+        while counter < total_layers:
+            # Determine the range for the current group
+            start_index = counter
+            # print("==============================")
+            # print(self.group_size, total_layers)
+            print(f"{counter}, {self.group_size}, {total_layers}")
+            end_index = min(counter + self.group_size, total_layers)
+            
+            # Process the group
+            # x = self.run_group(x, start_index, end_index)
+            x = checkpoint(
+                self.run_group, 
+                x, 
+                start_index, 
+                end_index, 
+                use_reentrant=False
+            )
+            counter = end_index
+        return x
+    
     def forward(self, x: Int[Tensor, " ... sequence_length"]) -> Float[Tensor, " ... sequence_length vocab_size"]:
         """
         Args:
@@ -246,11 +286,11 @@ class BasicsTransformerLM(nn.Module):
         # (batch size, sequence_length, d_model)
         # x = self.positional_encoder(embedded_tokens, positions)
         x = embedded_tokens
-
-        for layer in self.layers:
-            # (batch size, sequence_length, d_model)
-            x = layer(x)
-        # (batch size, sequence_length, d_model)
+        x = self.forward_in_groups(x)
+        # for layer in self.layers:
+        #     # (batch size, sequence_length, d_model)
+        #     x = layer(x)
+        # # (batch size, sequence_length, d_model)
         x = self.ln_final(x)
         # (batch size, sequence_length, vocab_size)
         logits = self.lm_head(x)
@@ -397,7 +437,43 @@ class SwiGLU(nn.Module):
     def forward(self, x):
         return self.w2(silu(self.w1(x)) * self.w3(x))
 
-@nvtx.range("scaled dot product attention")
+# @nvtx.range("scaled dot product attention")
+# def scaled_dot_product_attention(
+#     Q: Float[Tensor, " ... queries d_k"],
+#     K: Float[Tensor, " ... keys    d_k"],
+#     V: Float[Tensor, " ... keys    d_v"],
+#     mask: Bool[Tensor, " ... queries keys"] | None = None,
+# ) -> Float[Tensor, " ... queries d_v"]:
+#     """Scaled dot-product attention.
+
+#     This function implements Eq. 1 of the Transformer paper.
+
+#     Args:
+#         Q: Tensor of queries, may have any number of leading dimensions.
+#         K: Tensor of keys, sharing leading dimensions with Q.
+#         V: Tensor of values, sharding leading dimensions with Q and K.
+#         mask: An (optional) mask of shape (..., seq_len, seq_len).
+#             Attention scores for positions with a mask value of `False` should
+#             be masked out, i.e., not affect the softmaxed attention probabilities.
+
+#     Returns:
+#         torch.FloatTensor of shape (..., seq_len, value_dimension)
+#         with the output of running your scaled dot product attention
+#         implementation with the provided key, query, and value tensors.
+#     """
+
+#     d_k = K.shape[-1]
+#     with nvtx.range("Attention scores: QK matmul"):
+#         attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
+
+#         if mask is not None:
+#             attention_scores = torch.where(mask, attention_scores, float("-inf"))
+#     with nvtx.range("softmax"):
+#         attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
+#     with nvtx.range("Final matmul: AV matmul"):
+#         output = einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+#     return output
+
 def scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
     K: Float[Tensor, " ... keys    d_k"],
@@ -423,17 +499,13 @@ def scaled_dot_product_attention(
     """
 
     d_k = K.shape[-1]
-    with nvtx.range("Attention scores: QK matmul"):
-        attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
+    attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
 
-        if mask is not None:
-            attention_scores = torch.where(mask, attention_scores, float("-inf"))
-    with nvtx.range("softmax"):
-        attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
-    with nvtx.range("Final matmul: AV matmul"):
-        output = einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+    if mask is not None:
+        attention_scores = torch.where(mask, attention_scores, float("-inf"))
+    attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
+    output = einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
     return output
-
 
 class CausalMultiHeadSelfAttention(nn.Module):
     """Multi-Head Self-Attention
