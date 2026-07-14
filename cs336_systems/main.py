@@ -11,13 +11,12 @@ import math
 # 128 and 2048
 
 def main():
-    w_type = "fb"
+    w_type = "f"
     which_data_type = None
     # method(d_model=2560, d_ff = 10240, num_layers = 32, num_heads = 32, rope_theta=None, warmup_steps=5,
     #     steps=10,which_type=w_type, context_length=120,which_data_type = which_data_type)
     method(d_model=768, d_ff = 3072, num_layers = 12, num_heads = 12, rope_theta=None, warmup_steps=5,
-        steps=1,which_type=w_type, context_length=128,which_data_type = which_data_type, memory_profiling = True
-        , group_size=6)
+        steps=1,which_type=w_type, context_length=256,which_data_type = which_data_type, memory_profiling = False, group_size=1)
     
 def code_test():
     layers = 32

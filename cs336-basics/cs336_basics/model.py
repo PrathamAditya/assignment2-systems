@@ -240,7 +240,7 @@ class BasicsTransformerLM(nn.Module):
     def run_group(self, input_data, start_index, end_index):
         """Applies layers[start_index:end_index] to input_data."""
         output = input_data
-        print(f"Ran: {start_index}, {end_index}")
+        # print(f"Ran: {start_index}, {end_index}")
         for i in range(start_index, end_index):
             output = self.layers[i](output)
         return output
@@ -253,7 +253,7 @@ class BasicsTransformerLM(nn.Module):
             start_index = counter
             # print("==============================")
             # print(self.group_size, total_layers)
-            print(f"{counter}, {self.group_size}, {total_layers}")
+            # print(f"{counter}, {self.group_size}, {total_layers}")
             end_index = min(counter + self.group_size, total_layers)
             
             # Process the group
