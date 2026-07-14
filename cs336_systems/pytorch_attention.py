@@ -38,14 +38,14 @@ def main():
     d_model = [16, 32, 64, 128]
 
     sequence_length = [256, 1024, 4096]
-    sequence_length = [256, 1024, 4096, 8192, 16384]
+    sequence_length = [256, 1024, 4096]
     d_model = [16, 32, 64, 128]
     
     # ###FIRST OOM###
     # sequence_length = [4096]
     # d_model = [128]
     time = {}
-
+    # scaled_dot_product_attention_opt = torch.compile(model_module.scaled_dot_product_attention)
     for s_l in sequence_length:
         for d_m in d_model:
             # warm_up
@@ -58,6 +58,7 @@ def main():
                 Q = torch.rand(8, s_l, d_m, requires_grad=True).to(device=device)
                 K = torch.rand(8, s_l, d_m, requires_grad=True).to(device=device)
                 V = torch.rand(8, s_l, d_m, requires_grad=True).to(device=device)
+                # output = scaled_dot_product_attention_opt(Q, K , V).to(device=device)
                 output = model_module.scaled_dot_product_attention(Q, K , V).to(device=device)
                 loss = output.sum()
                 loss.backward()
@@ -73,6 +74,7 @@ def main():
                 # optimizer.zero_grad(set_to_none = True)
                 torch.cuda.synchronize()
                 time_start = timeit.default_timer()
+                # output = scaled_dot_product_attention_opt(Q, K , V).to(device=device)
                 output = model_module.scaled_dot_product_attention(Q, K , V).to(device=device)
                 loss = output.sum()
                 if i == 99: print(f"{d_m}_{s_l} Forward: {torch.cuda.memory_allocated(device=device) / (1024**2): 4f}MiB")
@@ -90,11 +92,11 @@ def main():
             time[f"{s_l}_{d_m}_forward"]=statistics.mean(temp_forward_time_list)
             time[f"{s_l}_{d_m}_backward"]=statistics.mean(temp_backward_time_list)
             ###FOR LOCAL RUN###
-            memory_snapshot_filename = Path(f"../memory_profiling/memory_snapshot_pytorch_attention_forward_{s_l}_{d_m}.pickle")
-            memory_snapshot_filename.parent.mkdir(parents=True, exist_ok=True)
-            torch.cuda.memory._dump_snapshot(memory_snapshot_filename)
-            torch.cuda.memory._record_memory_history(enabled=None)
-            print(time_end-time_start)
+            # memory_snapshot_filename = Path(f"../memory_profiling/memory_snapshot_pytorch_attention_forward_{s_l}_{d_m}.pickle")
+            # memory_snapshot_filename.parent.mkdir(parents=True, exist_ok=True)
+            # torch.cuda.memory._dump_snapshot(memory_snapshot_filename)
+            # torch.cuda.memory._record_memory_history(enabled=None)
+            # print(time_end-time_start)
     print(time)
 if __name__ == "__main__":
     main()

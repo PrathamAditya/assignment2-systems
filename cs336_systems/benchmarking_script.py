@@ -20,7 +20,12 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
     model = model_module.BasicsTransformerLM(vocab_size = vocab_size, context_length=context_length, d_model = d_model,
                                              num_layers = num_layers, num_heads=num_heads, d_ff=d_ff
                               , rope_theta=rope_theta, group_size=group_size).to(device=device)
-    model.train()
+    
+    # model.train()
+    ###torch.compile###
+    model_opt = torch.compile(model)
+    model_opt.train()
+    
     ctx = (torch.autocast(device_type="cuda", dtype=torch.bfloat16) if which_data_type == "b" else nullcontext())
     optimizer = AdamW(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01,)
     times = []
@@ -28,19 +33,22 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
     if which_type == "f":
         while counter < warmup_steps:
             with ctx, torch.inference_mode():
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
                 counter+=1
         if memory_profiling == True:
             # torch.cuda.synchronize()
             torch.cuda.memory._record_memory_history(max_entries=100000)
             with ctx, torch.inference_mode():
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
         else:
             while counter < warmup_steps + steps:
                 torch.cuda.synchronize()
                 time_start = timeit.default_timer()
                 with ctx, torch.inference_mode():
-                    logits = model(x)
+                    # logits = model(x)
+                    logits = model_opt(x)
                 torch.cuda.synchronize()
                 time_end = timeit.default_timer()
                 times.append(time_end-time_start)
@@ -49,7 +57,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
         while counter < warmup_steps:
             optimizer.zero_grad(set_to_none = True)
             with ctx:
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
                 loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
             counter+=1
@@ -58,7 +67,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
             torch.cuda.memory._record_memory_history(max_entries=100000)
             optimizer.zero_grad(set_to_none = True)
             with ctx:
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
                 loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
         else:
@@ -67,7 +77,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
                 time_start = timeit.default_timer()
                 optimizer.zero_grad(set_to_none = True)
                 with ctx:
-                    logits = model(x)
+                    # logits = model(x)
+                    logits = model_opt(x)
                     loss = nn_utils.cross_entropy(logits, y)
                 loss.backward()
                 torch.cuda.synchronize()
@@ -78,7 +89,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
         while counter < warmup_steps:
             optimizer.zero_grad(set_to_none = True)
             with ctx:
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
                 loss = nn_utils.cross_entropy(logits, y) 
             loss.backward()
             optimizer.step()
@@ -88,7 +100,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
             torch.cuda.memory._record_memory_history(max_entries=100000)
             optimizer.zero_grad(set_to_none = True)
             with ctx:
-                logits = model(x)
+                # logits = model(x)
+                logits = model_opt(x)
                 loss = nn_utils.cross_entropy(logits, y)
             loss.backward()
             optimizer.step()
@@ -98,7 +111,8 @@ def method(d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta:
                 time_start = timeit.default_timer()
                 optimizer.zero_grad(set_to_none = True)
                 with ctx:
-                    logits = model(x)
+                    # logits = model(x)
+                    logits = model_opt(x)
                     loss = nn_utils.cross_entropy(logits, y)
                 loss.backward()
                 optimizer.step()
