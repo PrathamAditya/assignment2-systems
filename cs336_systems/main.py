@@ -28,5 +28,39 @@ def code_test():
             if counter <= layers: print(f"{counter}, ")
             
         print("=============")
+
+def tensor_broadcasting():
+    Bq = 4
+    d = 3
+
+    # O has shape (Bq, d)
+    O = torch.tensor([
+        [1., 2., 3.],
+        [4., 5., 6.],
+        [7., 8., 9.],
+        [10., 11., 12.]
+    ])
+
+    # One scale factor per row
+    scale = torch.tensor([10., 20., 30., 40.])
+
+    print("O shape:", O.shape)
+    print(O)
+
+    print("\nscale shape:", scale.shape)
+    print(scale)
+
+    # View as (Bq, 1)
+    scale_col = scale[:, None]
+
+    print("\nscale_col shape:", scale_col.shape)
+    print(scale_col)
+
+    # Broadcast multiplication
+    result = scale_col * O
+
+    print("\nResult shape:", result.shape)
+    print(result)
+    
 if __name__ == "__main__":
-    main()
+    tensor_broadcasting()
