@@ -2,6 +2,11 @@ import modal
 
 app = modal.App("cs336-assignment2")
 
+memory_volume = modal.Volume.from_name(
+    "cs336-memory",
+    create_if_missing=True,
+)
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .add_local_dir(
@@ -26,7 +31,8 @@ image = (
 @app.function(
     image=image,
     gpu="B200",
-    timeout=60 * 20,
+    volumes={"/memory": memory_volume},
+    timeout=60 * 10,
 )
 # Size d_model d_ff num_layers num_heads
 # small 768 3072 12 12
@@ -36,18 +42,35 @@ image = (
 # 10B 4608 12288 50 36
 def benchmark():
     from cs336_systems.benchmarking_script import method
+    # method(
+    #     d_model=2560,
+    #     d_ff=10240,
+    #     num_layers=32,
+    #     num_heads=32,
+    #     rope_theta=10000.0,
+    #     warmup_steps=0,
+    #     steps=1,
+    #     which_type="f",
+    #     which_data_type=None,
+    #     context_length=2048,
+    #     memory_profiling=True
+    # )
     method(
-        d_model=4608,
-        d_ff=12288,
-        num_layers=50,
-        num_heads=36,
-        rope_theta=10000.0,
+        d_model=2560,
+        d_ff=10240,
+        num_layers=32,
+        num_heads=32,
+        rope_theta=None,
         warmup_steps=5,
-        steps=10,
-        which_type="f",
+        steps=1,
+        which_type="fb",
         which_data_type="b",
-        context_length=512,
+        context_length=2048,
+        memory_profiling=True,
+        group_size= 6
     )
+    # method(d_model=768, d_ff = 3072, num_layers = 32, num_heads = 12, rope_theta=None, warmup_steps=5,
+    # steps=1,which_type="fb", context_length=2048,which_data_type = "b", memory_profiling = True, group_size=6)
 
 @app.local_entrypoint()
 def run():
