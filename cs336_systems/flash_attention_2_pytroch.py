@@ -69,8 +69,12 @@ class FlashAttention2Pytorch(torch.autograd.Function):
             final_o_list.append(torch.cat(o_list, dim=0))
             final_l_list.append(torch.cat(l_list, dim=0))
         
+
+        print(f"Q shape: {Q.shape}")
         O = torch.stack(final_o_list, dim = 0)
         L = torch.stack(final_l_list, dim = 0)
+        print(f"Q shape: {Q.shape}")
+        print(f"O shape: {O.shape}")
         print(L.shape)
         ctx.save_for_backward(Q, K, V, O, L)
         return O
