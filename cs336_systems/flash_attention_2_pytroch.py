@@ -69,12 +69,27 @@ class FlashAttention2Pytorch(torch.autograd.Function):
             final_o_list.append(torch.cat(o_list, dim=0))
             final_l_list.append(torch.cat(l_list, dim=0))
         
+
+        print(f"Q shape: {Q.shape}")
         O = torch.stack(final_o_list, dim = 0)
         L = torch.stack(final_l_list, dim = 0)
+        print(f"Q shape: {Q.shape}")
+        print(f"O shape: {O.shape}")
         print(L.shape)
         ctx.save_for_backward(Q, K, V, O, L)
         return O
     
     @staticmethod
     def backward(ctx, grad_output):
-        raise NotImplementedError
+        Q, K, V, O, L = ctx.saved_tensors
+        Bq, Sq, Dq = Q.shape
+        D = torch.sum(O*grad_output, dim=-1)
+        scale_d = 1.0/math.sqrt(Dq)
+        S = torch.matmul(Q, K.transpose(-1, -2))*scale_d
+        P = torch.exp(S - L[:, :, None])
+        dV = torch.matmul(P.transpose(-1, -2), grad_output)
+        dP = torch.matmul(grad_output, V.transpose(-1, -2)) 
+        dS = P * (dP - D[:, :, None])
+        dQ = torch.matmul(dS, K)*scale_d
+        dK = torch.matmul(dS.transpose(-1, -2), Q)*scale_d
+        return dQ, dK, dV, None
