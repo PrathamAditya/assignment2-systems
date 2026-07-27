@@ -56,7 +56,7 @@ def flash_attention_forward_kernel(
     q_tile = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero") 
     m = tl.full([Q_TILE_SIZE], float("-inf"), dtype=tl.float32)
     l = tl.full([Q_TILE_SIZE], 0, dtype=tl.float32)
-    O = tl.full([Q_TILE_SIZE, D], 0, dtype=tl. float32)
+    O = tl.full([Q_TILE_SIZE, D], 0, dtype=tl.float32)
 
     for i in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
         k_block_ptr = tl.make_block_ptr(
@@ -94,24 +94,24 @@ def flash_attention_forward_kernel(
         l_new = tl.exp(m_prev-m_new) * l_prev + tl.sum(P, axis=1)
         scale_vector = tl.exp(m_prev - m_new)
         scaled_O_prev = scale_vector[:, None] * O_prev
-        O_new = scaled_O_prev + tl.dot(P, v_tile)
+        O_new = scaled_O_prev + tl.dot(P.to(v_tile.dtype), v_tile)
 
         m = m_new
         l = l_new
         O = O_new
-    
-    tl.store(O_block_ptr, O / l [:, None])
-    # tl.store(l_block_ptr, m + tl.log(l))
+
+    out_block = (O / l[:, None]).to(O_block_ptr.type.element_ty)
+    tl.store(O_block_ptr, out_block)
     tl.store(l_ptrs, m + tl.log(l), mask=l_mask)
      
 class FlashAttention2Triton(torch.autograd.Function):
     @staticmethod
     def forward(ctx, Q, K, V: torch.tensor, is_causal=False):
         if K.shape != V.shape:
-            raise "K and V shape should match."
+            raise ValueError("K and V shape should match.")
         
         B, S, D = Q.shape
-        O = torch.empty(B, S, D, device=Q.device)
+        O = torch.empty(B, S, D, device=Q.device, dtype=Q.dtype)
         L = torch.empty(B, S, device=Q.device)
         scale = 1.0/math.sqrt(D)
 
@@ -158,21 +158,27 @@ class FlashAttention2Triton(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         Q, K, V, O, L = ctx.saved_tensors
-        is_casual = ctx.is_casual
-
-        
+        grad_output = grad_output.to(dtype=Q.dtype)
         Bq, Sq, Dq = Q.shape
-        D = torch.sum(O*grad_output, dim=-1)
-        scale_d = 1.0/math.sqrt(Dq)
-        S = torch.matmul(Q, K.transpose(-1, -2))*scale_d
-        if is_casual: 
-            b, s, d = Q.shape
-            mask = torch.tril(torch.ones(s, s, dtype=torch.bool, device=Q.device))
-            S = torch.where(mask, S, float("-inf"))
-        P = torch.exp(S - L[:, :, None])
+
+        # 1. Rowmax / normalization sum in float32 for precision
+        D = torch.sum(O * grad_output, dim=-1)
+        scale_d = 1.0 / math.sqrt(Dq)
+
+        # 2. Recompute Attention matrix
+        S = torch.matmul(Q, K.transpose(-1, -2)) * scale_d
+        P = torch.exp(S - L[:, :, None]).to(dtype=Q.dtype)  # Cast P back to bfloat16
+
+        # 3. Compute gradients
         dV = torch.matmul(P.transpose(-1, -2), grad_output)
         dP = torch.matmul(grad_output, V.transpose(-1, -2)) 
-        dS = P * (dP - D[:, :, None])
-        dQ = torch.matmul(dS, K)*scale_d
-        dK = torch.matmul(dS.transpose(-1, -2), Q)*scale_d
+
+        # 4. Compute dS and cast to bfloat16
+        dS = (P * (dP - D[:, :, None])).to(dtype=Q.dtype)    # Cast dS back to bfloat16
+
+        # 5. Compute dQ and dK
+        dQ = torch.matmul(dS, K) * scale_d
+        dK = torch.matmul(dS.transpose(-1, -2), Q) * scale_d
+
         return dQ, dK, dV, None
+

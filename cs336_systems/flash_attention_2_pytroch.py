@@ -10,7 +10,7 @@ class FlashAttention2Pytorch(torch.autograd.Function):
         final_l_list = []
         attention_state = {}
         if K.shape != V.shape:
-            raise "K and V shape should match."
+            raise ValueError("K and V shape should match.")
 
         for chunk_Q, chunk_K, chunk_V in zip(Q, K, V):
             nq, d = chunk_Q.shape
@@ -30,7 +30,7 @@ class FlashAttention2Pytorch(torch.autograd.Function):
 
                 attention_state[f"O{counter_i}_0"] = torch.zeros(_bq, d,device=Q.device)
                 attention_state[f"l{counter_i}_0"] = torch.zeros(_bq, device=Q.device)
-                attention_state[f"m{counter_i}_0"] = torch.full((_bq,), float('-inf'), device=Q.device)
+                attention_state[f"m{counter_i}_0"] = torch.full((_bq,), float('-inf'), dtype=Q.dtype, device=Q.device)
                 counter_j = -1
                 for k_chunk, v_chunk in zip(k_chunks, v_chunks):
                     counter_j+=1
@@ -52,6 +52,7 @@ class FlashAttention2Pytorch(torch.autograd.Function):
                     attention_state[f"S{counter_i}_{counter_j}"] = torch.matmul(q_chunk, k_chunk.T)*scale_d
                     attention_state[f"m{counter_i}_{counter_j}"] = torch.max(m_prev, torch.max(attention_state[f"S{counter_i}_{counter_j}"], dim=1).values)
                     attention_state[f"P{counter_i}_{counter_j}"] = torch.exp(attention_state[f"S{counter_i}_{counter_j}"]-attention_state[f"m{counter_i}_{counter_j}"][:, None])
+                    # print( attention_state[f"P{counter_i}_{counter_j}"])
                     attention_state[f"l{counter_i}_{counter_j}"] = torch.exp(m_prev-attention_state[f"m{counter_i}_{counter_j}"])*l_prev + torch.sum(attention_state[f"P{counter_i}_{counter_j}"], dim=1)
                                             
                     scale_vector = torch.exp(m_prev - attention_state[f"m{counter_i}_{counter_j}"])
@@ -73,26 +74,54 @@ class FlashAttention2Pytorch(torch.autograd.Function):
             final_l_list.append(torch.cat(l_list, dim=0))
         
 
-        print(f"Q shape: {Q.shape}")
+        # print(f"Q shape: {Q.shape}")
         O = torch.stack(final_o_list, dim = 0)
         L = torch.stack(final_l_list, dim = 0)
-        print(f"Q shape: {Q.shape}")
-        print(f"O shape: {O.shape}")
-        print(L.shape)
+        # print(f"Q shape: {Q.shape}")
+        # print(f"O shape: {O.shape}")
+        # print(L.shape)
         ctx.save_for_backward(Q, K, V, O, L)
         return O
     
+    # @staticmethod
+    # def backward(ctx, grad_output):
+    #     Q, K, V, O, L = ctx.saved_tensors
+    #     grad_output = grad_output.to(dtype=Q.dtype)
+    #     Bq, Sq, Dq = Q.shape
+    #     D = torch.sum(O*grad_output, dim=-1)
+    #     scale_d = 1.0/math.sqrt(Dq)
+    #     S = torch.matmul(Q, K.transpose(-1, -2))*scale_d
+    #     P = torch.exp(S - L[:, :, None])
+    #     dV = torch.matmul(P.transpose(-1, -2), grad_output)
+    #     dP = torch.matmul(grad_output, V.transpose(-1, -2)) 
+    #     dS = P * (dP - D[:, :, None])
+    #     dQ = torch.matmul(dS, K)*scale_d
+    #     dK = torch.matmul(dS.transpose(-1, -2), Q)*scale_d
+    #     return dQ, dK, dV, None
+
     @staticmethod
     def backward(ctx, grad_output):
         Q, K, V, O, L = ctx.saved_tensors
+        grad_output = grad_output.to(dtype=Q.dtype)
         Bq, Sq, Dq = Q.shape
-        D = torch.sum(O*grad_output, dim=-1)
-        scale_d = 1.0/math.sqrt(Dq)
-        S = torch.matmul(Q, K.transpose(-1, -2))*scale_d
-        P = torch.exp(S - L[:, :, None])
+
+        # 1. Rowmax / normalization sum in float32 for precision
+        D = torch.sum(O * grad_output, dim=-1)
+        scale_d = 1.0 / math.sqrt(Dq)
+
+        # 2. Recompute Attention matrix
+        S = torch.matmul(Q, K.transpose(-1, -2)) * scale_d
+        P = torch.exp(S - L[:, :, None]).to(dtype=Q.dtype)  # Cast P back to bfloat16
+
+        # 3. Compute gradients
         dV = torch.matmul(P.transpose(-1, -2), grad_output)
         dP = torch.matmul(grad_output, V.transpose(-1, -2)) 
-        dS = P * (dP - D[:, :, None])
-        dQ = torch.matmul(dS, K)*scale_d
-        dK = torch.matmul(dS.transpose(-1, -2), Q)*scale_d
+
+        # 4. Compute dS and cast to bfloat16
+        dS = (P * (dP - D[:, :, None])).to(dtype=Q.dtype)    # Cast dS back to bfloat16
+
+        # 5. Compute dQ and dK
+        dQ = torch.matmul(dS, K) * scale_d
+        dK = torch.matmul(dS.transpose(-1, -2), Q) * scale_d
+
         return dQ, dK, dV, None
