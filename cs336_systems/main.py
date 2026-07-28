@@ -61,6 +61,9 @@ def tensor_broadcasting():
 
     print("\nResult shape:", result.shape)
     print(result)
-    
+
+def flash_benchmarking():
+    from cs336_systems.flash_benchmarking import main
+    main("4")
 if __name__ == "__main__":
-    tensor_broadcasting()
+    flash_benchmarking()

@@ -1,4 +1,5 @@
 import modal
+from cs336_systems.distributed_communication_single_node import main
 
 app = modal.App("cs336-assignment2")
 
@@ -28,50 +29,43 @@ image = (
     .env({"PATH": "/root/project/.venv/bin:$PATH"})
 )
 
-@app.function(
-    image=image,
-    gpu="B200",
-    volumes={"/memory": memory_volume},
-    timeout=60 * 10,
-)
-# Size d_model d_ff num_layers num_heads
-# small 768 3072 12 12
-# medium 1024 4096 24 16
-# large 1280 5120 36 20
-# xl 2560 10240 32 32
-# 10B 4608 12288 50 36
-def benchmark():
-    from cs336_systems.benchmarking_script import method
-    # method(
-    #     d_model=2560,
-    #     d_ff=10240,
-    #     num_layers=32,
-    #     num_heads=32,
-    #     rope_theta=10000.0,
-    #     warmup_steps=0,
-    #     steps=1,
-    #     which_type="f",
-    #     which_data_type=None,
-    #     context_length=2048,
-    #     memory_profiling=True
-    # )
-    method(
-        d_model=2560,
-        d_ff=10240,
-        num_layers=32,
-        num_heads=32,
-        rope_theta=None,
-        warmup_steps=5,
-        steps=1,
-        which_type="fb",
-        which_data_type="b",
-        context_length=2048,
-        memory_profiling=True,
-        group_size= 6
-    )
-    # method(d_model=768, d_ff = 3072, num_layers = 32, num_heads = 12, rope_theta=None, warmup_steps=5,
-    # steps=1,which_type="fb", context_length=2048,which_data_type = "b", memory_profiling = True, group_size=6)
+# @app.function(
+#     image=image,
+#     gpu="B200",
+#     volumes={"/my_vol": modal.Volume.from_name("flash_benchmarking")},
+#     timeout=60 * 60,
+# )
+
+# def benchmark():
+#     import json
+#     from cs336_systems.flash_benchmarking import main
+#     result = main("3")
+
+#     file_path = "/my_vol/results.txt"
+#     with open(file_path, "w") as f:
+#         f.write(json.dumps(result, indent=4))
+
+#     print(result)
+#     modal.Volume.from_name("flash_benchmarking").commit()
+#     print(f"Saved output_dict to {file_path}")
+
+##############################################################################
+##############################################################################
+
+# Problem (distributed_communication_single_node): Distributed Communication (Single Node)
+
+# @app.function(image=image, gpu="A10G:6", timeout=600)
+# @app.function(image=image, gpu="H100:6", timeout=6000)
+# def d_c_s_n_benchmark():
+#     from cs336_systems.distributed_communication_single_node import main
+#     main()
+
+# Problem (naive_ddp): Naïve DDP
+@app.function(image=image, gpu="A10:4", timeout=3600)
+def naive_ddp():
+    from cs336_systems.naive_ddp import main
+    main()
 
 @app.local_entrypoint()
 def run():
-    benchmark.remote()
+    naive_ddp.remote()
