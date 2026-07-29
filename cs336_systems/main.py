@@ -65,5 +65,20 @@ def tensor_broadcasting():
 def flash_benchmarking():
     from cs336_systems.flash_benchmarking import main
     main("4")
+
+
+def tensor_splitting():
+    B = 128
+    S = 128
+    D = 128
+
+    data = torch.randn(B, S, D, device="cuda:0", dtype=torch.float32)
+    chunks = data.split(split_size=int(B/4), dim=0)
+
+    print(chunks[0].shape)
+    print(chunks[1].shape)
+    print(chunks[2].shape)
+    print(chunks[3].shape)
+
 if __name__ == "__main__":
-    flash_benchmarking()
+    tensor_splitting()
