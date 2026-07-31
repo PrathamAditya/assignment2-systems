@@ -1,7 +1,9 @@
 import os
 import torch
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import timeit
 
 class NaiveDDP(torch.nn.Module):
     """
@@ -35,6 +37,53 @@ class NaiveDDP(torch.nn.Module):
 
 def get_ddp_(module: torch.nn.Module) -> torch.nn.Module:
     return NaiveDDP(module)
+
+
+class FlatDDP(torch.nn.Module):
+    """
+    Naive Distributed Data Parallel wrapper.
+    Waits for the entire backward pass to finish before synchronizing gradients.
+    """
+    def __init__(self, module: torch.nn.Module):
+        super().__init__()
+        self.module = module
+        self.world_size = dist.get_world_size()
+
+        with torch.no_grad():
+            for param in self.module.parameters():
+                dist.broadcast(param.data, src=0)
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+        
+    def all_reduce_grads(self):
+        """
+        Synchronously averages gradients across all ranks.
+        Called manually after loss.backward() completes.
+        """
+        print("FLAT working")
+
+        with torch.no_grad():
+            grad_list = []
+            for param in self.module.parameters():
+                if param.requires_grad and param.grad is not None:
+                    param.grad.div_(self.world_size)
+                    grad_list.append(param.grad)
+            flatten_grads = _flatten_dense_tensors(grad_list)
+            torch.cuda.synchronize()
+            start_timer = timeit.default_timer()
+            dist.all_reduce(flatten_grads, op=dist.ReduceOp.SUM)
+            torch.cuda.synchronize()
+            end_timer = timeit.default_timer()
+            synced_grad_views = _unflatten_dense_tensors(flatten_grads, grad_list)
+            for original_grad, synced_view in zip(grad_list, synced_grad_views):
+                original_grad.copy_(synced_view)
+            return end_timer-start_timer
+
+
+
+def get_ddp_flat_(module: torch.nn.Module) -> torch.nn.Module:
+    return FlatDDP(module)
 
 
 # def setup(rank, world_size):

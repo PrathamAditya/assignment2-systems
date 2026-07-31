@@ -73,7 +73,7 @@ image = (
 # Problem (naive_ddp): Naïve DDP Benchmarking
 @app.function(image=image, gpu="A100-80GB:2", timeout=3600)
 def naive_ddp():
-    from cs336_systems.naive_ddp_benchmarking import main
+    from cs336_systems.minimal_ddp_flat_benchmarking import main
     main()
 
 @app.local_entrypoint()
