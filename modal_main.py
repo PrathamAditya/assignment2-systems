@@ -1,5 +1,4 @@
 import modal
-from cs336_systems.distributed_communication_single_node import main
 
 app = modal.App("cs336-assignment2")
 
@@ -53,17 +52,28 @@ image = (
 ##############################################################################
 
 # Problem (distributed_communication_single_node): Distributed Communication (Single Node)
-
 # @app.function(image=image, gpu="A10G:6", timeout=600)
 # @app.function(image=image, gpu="H100:6", timeout=6000)
 # def d_c_s_n_benchmark():
 #     from cs336_systems.distributed_communication_single_node import main
 #     main()
 
+######################################################################################
+######################################################################################
+
 # Problem (naive_ddp): Naïve DDP
-@app.function(image=image, gpu="A10:4", timeout=3600)
+# @app.function(image=image, gpu="A10:4", timeout=3600)
+# def naive_ddp():
+#     from cs336_systems.naive_ddp import main
+#     main()
+
+######################################################################################
+######################################################################################
+
+# Problem (naive_ddp): Naïve DDP Benchmarking
+@app.function(image=image, gpu="A100-80GB:2", timeout=3600)
 def naive_ddp():
-    from cs336_systems.naive_ddp import main
+    from cs336_systems.naive_ddp_benchmarking import main
     main()
 
 @app.local_entrypoint()
