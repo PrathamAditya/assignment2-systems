@@ -7,7 +7,6 @@ import cs336_basics.optimizer as optimizer
 from cs336_basics.toymodel import ToyModel
 
 
-
 class DDPOIP(torch.nn.Module):
     def __init__(self, module: torch.nn.Module):
         super().__init__()
@@ -34,6 +33,7 @@ class DDPOIP(torch.nn.Module):
             if handle is not None:
                 handle.wait()
         self.handles.clear()
+
     def _async_all_reduce_hook(self, param: torch.Tensor):
         with torch.no_grad():
             # Divide by world_size to get the average (doing it before summing is mathematically identical)
@@ -54,7 +54,7 @@ def get_ddp_(module: torch.nn.Module) -> torch.nn.Module:
     """
     return DDPOIP(module)
 
-def ddp_on_after_backward_(ddp_model, optimizer):
+def ddp_on_after_backward_(ddp_model):
     ddp_model.finish_gradient_synchronization()
 
 
