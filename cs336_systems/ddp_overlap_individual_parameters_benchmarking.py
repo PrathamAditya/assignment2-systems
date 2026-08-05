@@ -8,6 +8,7 @@ import cs336_basics.model as model_module
 import cs336_basics.nn_utils as nn_utils
 from cs336_systems.ddp_overlap_individual_parameters import get_ddp_, ddp_on_after_backward_
 from cs336_basics.optimizer import AdamW
+import torch.cuda.nvtx as nvtx
 
 TIME_LISTS = {}
 
@@ -47,26 +48,28 @@ def distributed_demo(rank, world_size, x_chunks, y_chunks, warm_up: int, reps: i
     optimizer = AdamW(model.parameters())
     model.train()
 
-    for _ in range(warm_up):
-        logits = model(x)
-        loss = nn_utils.cross_entropy(logits, y)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        ddp_on_after_backward_(model)
-        optimizer.step()
-
-    for _ in range(reps):
-        torch.cuda.synchronize(device)
-        start_time_full = timeit.default_timer()
-        logits = model(x)
-        loss = nn_utils.cross_entropy(logits, y)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        ddp_on_after_backward_(model)
-        optimizer.step()
-        torch.cuda.synchronize(device)
-        end_time_full = timeit.default_timer()
-        time_list_full_pass.append(end_time_full-start_time_full)
+    with nvtx.range("Warmup"):
+        for _ in range(warm_up):
+            logits = model(x)
+            loss = nn_utils.cross_entropy(logits, y)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            ddp_on_after_backward_(model)
+            optimizer.step()
+    with nvtx.range("Traning Step"):
+        for _ in range(reps):
+            torch.cuda.synchronize(device)
+            start_time_full = timeit.default_timer()
+            logits = model(x)
+            loss = nn_utils.cross_entropy(logits, y)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            with nvtx.range("Waiting"):
+                ddp_on_after_backward_(model)
+            optimizer.step()
+            torch.cuda.synchronize(device)
+            end_time_full = timeit.default_timer()
+            time_list_full_pass.append(end_time_full-start_time_full)
 
     print(f"Stats for: {rank} ###################")
     avg_time = statistics.mean(time_list_full_pass)
