@@ -7,6 +7,7 @@ import statistics
 import cs336_basics.model as model_module
 import cs336_basics.nn_utils as nn_utils
 import cs336_systems.naive_ddp as naive_ddp
+import torch.cuda.nvtx as nvtx
 
 TIME_LISTS = {}
 
@@ -57,31 +58,33 @@ def distributed_demo(rank, world_size, x_chunks, y_chunks, warm_up: int, reps: i
     # print(type(model))
     # print(hasattr(model, "all_reduce_grads"))
     # return
-    for _ in range(warm_up):
-        logits = model(x)
-        loss = nn_utils.cross_entropy(logits, y)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        model.all_reduce_grads()
-        optimizer.step()
-
+    with nvtx.range("Warmup"):
+        for _ in range(warm_up):
+            logits = model(x)
+            loss = nn_utils.cross_entropy(logits, y)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            model.all_reduce_grads()
+            optimizer.step()
     for _ in range(reps):
-        torch.cuda.synchronize(device)
-        start_time_full = timeit.default_timer()
-        logits = model(x)
-        loss = nn_utils.cross_entropy(logits, y)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.cuda.synchronize(device)
-        start_time_c_communication = timeit.default_timer()
-        model.all_reduce_grads()
-        torch.cuda.synchronize(device)
-        end_time_c_communication = timeit.default_timer()
-        optimizer.step()
-        torch.cuda.synchronize(device)
-        end_time_full = timeit.default_timer()
-        time_list_full_pass.append(end_time_full-start_time_full)
-        time_list_collective_communication.append(end_time_c_communication - start_time_c_communication)
+        with nvtx.range("Training Step"):
+            torch.cuda.synchronize(device)
+            start_time_full = timeit.default_timer()
+            logits = model(x)
+            loss = nn_utils.cross_entropy(logits, y)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.cuda.synchronize(device)
+            start_time_c_communication = timeit.default_timer()
+            with nvtx.range("Reduce All"):
+                model.all_reduce_grads()
+            torch.cuda.synchronize(device)
+            end_time_c_communication = timeit.default_timer()
+            optimizer.step()
+            torch.cuda.synchronize(device)
+            end_time_full = timeit.default_timer()
+            time_list_full_pass.append(end_time_full-start_time_full)
+            time_list_collective_communication.append(end_time_c_communication - start_time_c_communication)
 
     print(f"Stats for: {rank} ###################")
     avg_time = statistics.mean(time_list_full_pass)
