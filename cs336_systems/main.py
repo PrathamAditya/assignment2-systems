@@ -66,6 +66,12 @@ def flash_benchmarking():
     from cs336_systems.flash_benchmarking import main
     main("4")
 
+def shape_check():
+    import torch
+    import numpy as np
+    # x = torch.rand((1,10))
+    x = np.array([1, 2, 4])
+    print(x.shape)
 
 def tensor_splitting():
     B = 128
@@ -81,4 +87,4 @@ def tensor_splitting():
     print(chunks[3].shape)
 
 if __name__ == "__main__":
-    tensor_splitting()
+    shape_check()
